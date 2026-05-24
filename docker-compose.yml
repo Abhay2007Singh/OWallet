@@ -1,0 +1,211 @@
+# =============================================================================
+# PyWallet — Docker Compose (Development)
+# Version: Compose specification (no explicit version key needed in modern Docker)
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 15 — Primary relational database
+  # Why PostgreSQL 15? It supports NUMERIC precisely, has native UUID type,
+  # excellent ACID guarantees, and row-level locking — all critical for fintech.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine          # alpine = smaller image, same functionality
+    container_name: pywallet_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"                    # host:container — allows psql from host machine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # persist DB across container restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - pywallet_network
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — In-memory store
+  # Serves dual purpose: (1) Celery message broker/result backend,
+  # (2) Application-level caching (rate limits, session tokens in Phase 2).
+  # Why Redis over RabbitMQ? Simpler setup; Redis already exists for caching.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: pywallet_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data               # persist Redis data (AOF/RDB snapshots)
+    command: redis-server --appendonly yes   # enable AOF persistence
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pywallet_network
+
+  # ---------------------------------------------------------------------------
+  # FastAPI Application
+  # Depends on postgres and redis being healthy before starting.
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pywallet_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app                         # mount local code → hot-reload works
+    depends_on:
+      postgres:
+        condition: service_healthy     # wait until postgres passes healthcheck
+      redis:
+        condition: service_healthy
+    networks:
+      - pywallet_network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker — Background task processor
+  # Shares the same codebase image as the API; reads tasks from Redis broker.
+  # A separate container means workers scale independently from the web layer.
+  # ---------------------------------------------------------------------------
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pywallet_celery
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pywallet_network
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+
+  # ---------------------------------------------------------------------------
+  # Celery Beat — Periodic task scheduler
+  #
+  # Beat is a LIGHTWEIGHT SCHEDULER, not a worker.
+  # It reads the beat_schedule from celery_app.py and enqueues tasks
+  # at the configured intervals. The celery_worker containers execute them.
+  #
+  # CRITICAL: Run exactly ONE Beat instance at all times.
+  # Multiple Beat containers → tasks enqueued multiple times → duplicate runs.
+  # In Kubernetes: Deployment replicas=1, PodDisruptionBudget maxUnavailable=1.
+  #
+  # PersistentScheduler (--scheduler flag):
+  # Stores last-run timestamps in /tmp/celerybeat-schedule (a shelve file).
+  # Survives container restarts — knows which tasks ran and won't re-fire them
+  # within the same scheduled window after a restart.
+  #
+  # Why a separate container (not merged with celery_worker)?
+  # Workers scale horizontally (add more as load increases).
+  # Beat must never scale beyond 1 instance.
+  # Keeping them separate makes it impossible to accidentally run Beat on
+  # multiple replicas when scaling workers up.
+  # ---------------------------------------------------------------------------
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pywallet_celery_beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - celery_beat_data:/tmp   # persist the beat schedule database across restarts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pywallet_network
+    command: >
+      celery -A app.workers.celery_app beat
+        --loglevel=info
+        --scheduler=celery.beat:PersistentScheduler
+        --schedule=/tmp/celerybeat-schedule
+
+  # ---------------------------------------------------------------------------
+  # Flower — Celery monitoring dashboard
+  #
+  # Access at http://localhost:5555
+  #
+  # What Flower shows:
+  #   Active tasks:   tasks currently executing in workers
+  #   Processed:      total tasks completed, failed, retried
+  #   Failed tasks:   tasks that exhausted all retries (with full traceback)
+  #   Retry count:    how many times each task type has been retried
+  #   Worker status:  which workers are online, their concurrency
+  #   Queue depth:    how many tasks are waiting (lag indicator)
+  #   Task history:   searchable log of every task execution
+  #
+  # Why Flower matters in production fintech:
+  #   You enqueue simulate_bank_webhook for a deposit.
+  #   10 minutes later, the user calls support: "my deposit is still pending."
+  #   Without Flower: grep through Celery logs across multiple containers.
+  #   With Flower: search by transaction_id in the task args, see the full
+  #   execution history, retry count, error message, and worker that ran it.
+  #   Diagnosis time: 2 minutes instead of 20.
+  #
+  # Production hardening (not done here):
+  #   - Add basic auth: --basic_auth=admin:secret
+  #   - Reverse proxy behind nginx with TLS
+  #   - Restrict to internal network only (not public internet)
+  # ---------------------------------------------------------------------------
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pywallet_flower
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery_worker
+    networks:
+      - pywallet_network
+    command: celery -A app.workers.celery_app flower --port=5555
+
+# =============================================================================
+# Named volumes — Docker manages storage lifecycle independently from containers.
+# Data survives `docker compose down` but is removed by `docker compose down -v`.
+# =============================================================================
+volumes:
+  postgres_data:
+  redis_data:
+  celery_beat_data:   # persists the PersistentScheduler shelve file across Beat restarts
+
+# =============================================================================
+# Custom bridge network — containers communicate by service name (e.g., "postgres")
+# rather than by IP address. Isolated from other Docker networks on the host.
+# =============================================================================
+networks:
+  pywallet_network:
+    driver: bridge
