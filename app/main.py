@@ -21,7 +21,6 @@ from fastapi import FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -177,7 +176,17 @@ app.state.limiter = limiter
 #   HTTPException/StarletteHTTPException are re-delegated to FastAPI's built-in
 #   handler so 4xx/5xx HTTP errors still render correctly.
 # =============================================================================
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded: {exc.detail}"},
+            headers={"Retry-After": str(getattr(exc, "retry_after", 60))},
+        )
+    # Redis ConnectionError or other non-HTTP exception from slowapi
+    logger.error("rate_limiter_error", error_type=type(exc).__name__, error=str(exc))
+    return JSONResponse(status_code=503, content={"detail": "Rate limiter unavailable."})
 
 
 @app.exception_handler(Exception)
