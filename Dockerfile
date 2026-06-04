@@ -133,8 +133,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 #
 # Development override (in docker-compose.yml):
 #   command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "4", \
-     "--log-level", "info"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4 --log-level info"]
