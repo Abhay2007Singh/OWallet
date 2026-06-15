@@ -69,7 +69,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Account state
     # -------------------------------------------------------------------------
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="userrole"),  # creates a PostgreSQL ENUM type named 'userrole'
+        Enum(UserRole, name="userrole", values_callable=lambda x: [e.value for e in x]),
         default=UserRole.USER,
         nullable=False,
     )

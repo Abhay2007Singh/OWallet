@@ -671,7 +671,7 @@ async def transfer_money(
     sender_email_str: str = ""
     receiver_email_str: str = ""
 
-    async with db.begin():
+    try:
         # =====================================================================
         # STEP 1: Resolve receiver by email (no lock needed — read-only lookup)
         # Also resolve sender email for post-commit notification tasks.
@@ -898,12 +898,18 @@ async def transfer_money(
         await db.refresh(debit_tx)
         await db.refresh(credit_tx)
 
-        # Capture all return values before the block exits.
+        # Capture all return values before the commit.
         # expire_on_commit=False means these won't be cleared after commit,
         # but capturing them explicitly makes the intent crystal clear.
         debit_tx_id = debit_tx.id
         debit_tx_created_at = debit_tx.created_at
         sender_balance_after_final = sender_balance_after
+
+        await db.commit()
+
+    except Exception:
+        await db.rollback()
+        raise
 
     # =========================================================================
     # POST-COMMIT: cache invalidation and notifications

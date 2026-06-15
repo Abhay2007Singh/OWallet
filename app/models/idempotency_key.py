@@ -149,7 +149,7 @@ class IdempotencyKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     status: Mapped[IdempotencyStatus] = mapped_column(
-        Enum(IdempotencyStatus, name="idempotencystatus"),
+        Enum(IdempotencyStatus, name="idempotencystatus", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=IdempotencyStatus.COMPLETED,
         comment="Always COMPLETED for stored records (FAILED ops are never stored).",

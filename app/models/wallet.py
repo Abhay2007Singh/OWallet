@@ -76,7 +76,7 @@ class Wallet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     currency: Mapped[WalletCurrency] = mapped_column(
-        Enum(WalletCurrency, name="walletcurrency"),
+        Enum(WalletCurrency, name="walletcurrency", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=WalletCurrency.USD,
     )
@@ -105,6 +105,7 @@ class Wallet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     transactions: Mapped[list["Transaction"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Transaction",
         back_populates="wallet",
+        foreign_keys="Transaction.wallet_id",
         lazy="selectin",
         cascade="all, delete-orphan",
     )

@@ -216,12 +216,12 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     transaction_type: Mapped[TransactionType] = mapped_column(
-        Enum(TransactionType, name="transactiontype"),
+        Enum(TransactionType, name="transactiontype", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
 
     status: Mapped[TransactionStatus] = mapped_column(
-        Enum(TransactionStatus, name="transactionstatus"),
+        Enum(TransactionStatus, name="transactionstatus", values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=TransactionStatus.PENDING,
         index=True,
