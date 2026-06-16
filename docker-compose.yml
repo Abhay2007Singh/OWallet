@@ -209,3 +209,6 @@ volumes:
 networks:
   pywallet_network:
     driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    enable_ipv6: false

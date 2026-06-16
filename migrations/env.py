@@ -50,9 +50,11 @@ target_metadata = Base.metadata
 
 # -------------------------------------------------------------------------
 # Override the sqlalchemy.url from alembic.ini with our Settings value.
-# This means the DB URL is read from .env at runtime, never hardcoded.
+# We avoid config.set_main_option() because alembic's configparser treats
+# '%' as an interpolation character and will error on URL-encoded passwords
+# (e.g. %40 for @). Instead we pass the URL directly to the engine.
 # -------------------------------------------------------------------------
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+DATABASE_URL = settings.DATABASE_URL
 
 
 def run_migrations_offline() -> None:
@@ -64,9 +66,8 @@ def run_migrations_offline() -> None:
 
     Usage: alembic upgrade head --sql > migration.sql
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -108,11 +109,13 @@ async def run_async_migrations() -> None:
     Alembic's internal migration logic is synchronous. run_sync() runs it
     inside the async connection without blocking the event loop.
     """
-    # Build an async engine from alembic.ini config (URL overridden above)
+    # Build an async engine — pass DATABASE_URL directly to avoid alembic's
+    # configparser interpolating '%' characters in URL-encoded passwords.
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
-        poolclass=pool.NullPool,  # NullPool: no persistent connections during migration
+        poolclass=pool.NullPool,
+        url=DATABASE_URL,
     )
 
     async with connectable.connect() as connection:
