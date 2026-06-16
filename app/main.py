@@ -252,10 +252,10 @@ app.add_middleware(SlowAPIMiddleware)
 # Versioning the URL means future breaking changes go to /api/v2 without
 # disrupting existing clients still using /api/v1.
 # =============================================================================
-app.include_router(health_router) #, prefix="/api/v1")
-app.include_router(auth_router) #, prefix="/api/v1")
-app.include_router(wallet_router) #, prefix="/api/v1")          # read-only wallet ops
-app.include_router(payment_router) #, prefix="/api/v1")         # Phase 5: idempotent payments
+app.include_router(health_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(wallet_router, prefix="/api/v1")          # read-only wallet ops
+app.include_router(payment_router, prefix="/api/v1")         # Phase 5: idempotent payments
 
 
 # =============================================================================
