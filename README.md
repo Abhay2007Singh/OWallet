@@ -2,6 +2,10 @@
 
 A production-grade fintech wallet application with a React frontend and FastAPI backend. Demonstrates real financial system patterns: ACID atomicity, idempotent payments, double-entry bookkeeping, JWT auth with refresh token rotation, rate limiting, and async background tasks.
 
+**Live demo:** [https://o-wallet-three.vercel.app/](https://o-wallet-three.vercel.app/)
+
+**API docs:** [Swagger UI](https://owallet.onrender.com/docs) · [ReDoc](https://owallet.onrender.com/redoc)
+
 ---
 
 ## Table of Contents
