@@ -39,7 +39,7 @@ from app.core.redis import get_redis
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["100/minute"],
-    storage_uri= settings.RATE_LIMIT_REDIS_URL or settings.REDIS_URL,
+    storage_uri= settings.REDIS_URL,
 )
 
 _TRANSFER_LIMIT: int = 5
